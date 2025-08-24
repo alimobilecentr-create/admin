@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>User Receipt & Reward</title>
+  <style>
+    body{font-family:system-ui; background:#f9fafb; margin:0;}
+    .wrap{max-width:700px; margin:24px auto; padding:0 16px;}
+    .card{background:#fff; border-radius:16px; box-shadow:0 6px 18px rgba(0,0,0,.08); padding:16px; margin-bottom:16px;}
+    h1{margin:0; font-size:20px;}
+    .muted{color:#6b7280; font-size:14px;}
+    .big{font-size:28px; font-weight:700;}
+    .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+    .pill{padding:4px 10px; border-radius:999px; background:#eef2ff; color:#312e81; font-weight:700;}
+    button{padding:12px 16px; border-radius:12px; border:none; background:#0b5; color:#fff; font-weight:700; cursor:pointer;}
+    button.ghost{background:#111827;}
+    .timer{font-size:18px; font-weight:700;}
+    .code{font-family:monospace; background:#111827; color:#fff; padding:2px 6px; border-radius:8px;}
+    .center{text-align:center;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Receipt</h1>
+      <div class="muted">Transaction & Reward Status</div>
+    </div>
+
+    <div class="card">
+      <div class="row"><div>Serial:</div><div id="serial" class="pill">—</div></div>
+      <div style="margin-top:10px;"><div class="muted">Amount (₹)</div><div id="amount" class="big">—</div></div>
+      <div class="row" style="margin-top:10px;"><div class="muted">Mobile:</div><div id="mobile" class="code">—</div></div>
+      <div class="row" style="margin-top:10px;"><div class="muted">Date:</div><div id="date" class="code">—</div></div>
+    </div>
+
+    <div class="card center">
+      <div class="muted">Reward unlocks after 40 days</div>
+      <div id="count" class="timer">—</div>
+      <div id="claimBox" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card center">
+      <div class="row" style="justify-content:center;">
+        <button id="btnRefresh" class="ghost">🔄 Refresh</button>
+        <a id="waLink" href="#" target="_blank"><button>📲 WhatsApp</button></a>
+      </div>
+    </div>
+
+    <div class="card"><div class="muted">For any issue contact Ali Mobile Center. Reward unlocks exactly after 40×24h from transaction date.</div></div>
+  </div>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // 🔹 Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyBaiT5bJyHBcv17w37wtrNfeoVUIWZIOrE",
+      authDomain: "ewardali.firebaseapp.com",
+      projectId: "ewardali",
+      storageBucket: "ewardali.firebasestorage.app",
+      messagingSenderId: "822834992168",
+      appId: "1:822834992168:web:b28156cde7799c216c111d",
+      measurementId: "G-D521P15QZ6"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const $ = id=>document.getElementById(id);
+    const params=new URLSearchParams(location.search);
+    const serial=params.get("serial")||"";
+    $("serial").textContent=serial||"—";
+
+    function fmt(d){return new Date(d).toLocaleString();}
+
+    async function load(){
+      if(!serial){ $("count").textContent="No Serial"; return; }
+      const ref=doc(db,"receipts",serial);
+      const snap=await getDoc(ref);
+      if(!snap.exists()){ $("count").textContent="❌ Receipt not found"; return; }
+      const r=snap.data();
+      $("amount").textContent=r.amount??"—";
+      $("mobile").textContent=r.mobile||"—";
+      $("date").textContent=r.txDate?fmt(r.txDate):"—";
+
+      updateWhatsApp(r);
+      handleReward(r);
+    }
+
+    function updateWhatsApp(r){
+      const phone=(r.mobile||"").replace(/\D/g,"");
+      const msg=`Serial: ${serial}%0AAmount: ₹${r.amount}%0AStatus: ${r.rewardClaimed?"CLAIMED":"PENDING"}`;
+      const url=phone?`https://wa.me/${phone}?text=${msg}`:`https://wa.me/?text=${msg}`;
+      $("waLink").href=url;
+    }
+
+    function handleReward(r){
+      const unlockAt=r.txDate?new Date(r.txDate).getTime()+ (40*24*60*60*1000):null;
+      const claimed=r.rewardClaimed;
+      const claimedAt=r.rewardClaimedAt?fmt(r.rewardClaimedAt):null;
+      const now=Date.now();
+      const box=$("claimBox"); box.innerHTML="";
+
+      if(claimed){ $("count").innerHTML=`✅ Reward Claimed<br><span class="muted">${claimedAt||""}</span>`; return; }
+      if(!unlockAt){ $("count").textContent="Date not set"; return; }
+
+      if(now>=unlockAt){
+        $("count").textContent="🎉 Reward Unlocked";
+        const btn=document.createElement("button");
+        btn.textContent="Claim Reward";
+        btn.onclick=async ()=>{
+          await setDoc(doc(db,"receipts",serial),{rewardClaimed:true,rewardClaimedAt:new Date().toISOString()},{merge:true});
+          await load();
+        };
+        box.appendChild(btn);
+      }else{
+        const ms=unlockAt-now;
+        const d=Math.floor(ms/(24*60*60*1000));
+        const h=Math.floor((ms%(24*60*60*1000))/(60*60*1000));
+        const m=Math.floor((ms%(60*60*1000))/(60*1000));
+        const s=Math.floor((ms%(60*1000))/1000);
+        $("count").textContent=`⏳ ${d}d ${h}h ${m}m ${s}s`;
+        setTimeout(()=>handleReward(r),1000);
+      }
+    }
+
+    $("btnRefresh").addEventListener("click",load);
+    load();
+  </script>
+</body>
+</html>
